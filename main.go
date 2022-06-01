@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -27,11 +26,22 @@ var cmd = &cobra.Command{
 	Long:  "Split a composite yaml file into multiple distinct files",
 
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 1 {
-			return errors.New("requires an input file")
+		var err error
+
+		err = checkOutDir()
+		if err != nil {
+			log.Fatal(err)
 		}
 
-		_, err := os.Stat(args[0])
+		if isInputFromPipe() && len(args) > 0 {
+			log.Fatal("stdin is a pipe but file also given")
+		}
+
+		if len(args) > 1 {
+			log.Fatal("unknown arguments")
+		}
+
+		_, err = os.Stat(args[0])
 		if err != nil {
 			return fmt.Errorf("unable to open file %s - %s", args[0], err)
 		}
@@ -40,17 +50,13 @@ var cmd = &cobra.Command{
 
 	Run: func(cmd *cobra.Command, args []string) {
 
-		_, err := os.Stat(outDir)
+		var err error
+		var d []byte
+
+		d, err = readFileOrExit(args[0])
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		d, err := ioutil.ReadFile(args[0])
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		log.Printf("splitting %s...", args[0])
 
 		dec := yaml.NewDecoder(bytes.NewReader(d))
 
@@ -111,6 +117,41 @@ var cmd = &cobra.Command{
 			i++
 		}
 	},
+}
+
+func checkOutDir() error {
+	_, err := os.Stat(outDir)
+	return err
+}
+
+func readFileOrExit(filename string) ([]byte, error) {
+	var d []byte
+	var err error
+	if isInputFromPipe() {
+		// Get from stdin
+		log.Printf("splitting pipe")
+		d, err = ioutil.ReadAll(os.Stdin)
+		if err != nil {
+			log.Print("could not read stdin")
+		}
+	} else {
+		// ...otherwise get the file
+		var file *os.File
+		file, err = os.Open(filename)
+		if err != nil {
+			log.Print("could not open file")
+		} else {
+			d, err = ioutil.ReadAll(file)
+			defer file.Close()
+		}
+	}
+
+	return d, err
+}
+
+func isInputFromPipe() bool {
+	fileInfo, _ := os.Stdin.Stat()
+	return fileInfo.Mode()&os.ModeCharDevice == 0
 }
 
 // usage:
